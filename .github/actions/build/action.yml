@@ -1,0 +1,11 @@
+name: 'Configure and build'
+description: 'Setting up and building the project'
+runs:
+  using: "composite"
+  steps:
+    - name:  Configure Makefile
+      run:   cmake .
+      shell: bash
+    - name:  Building project files
+      run:   make
+      shell: bash

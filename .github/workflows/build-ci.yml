@@ -1,0 +1,17 @@
+name: Makefile CI
+
+on: [push]
+
+jobs:
+  make-testing:
+    name: Consistency testing from make file
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checking out repository
+        uses: actions/checkout@v2
+
+      - name: Building project
+        uses: ./.github/actions/build
+
+      - name: Checking
+        run:  make test
