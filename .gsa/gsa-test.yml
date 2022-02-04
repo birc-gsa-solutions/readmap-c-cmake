@@ -1,0 +1,18 @@
+tools:
+  GSABWT:
+    preprocess: "gsa preprocess {genome} approx-bwt"
+    map: "gsa search {genome} {reads} -o {outfile} approx -e {e} bwt"
+  readmap:
+    preprocess: "{root}/../readmap -p {genome} > {outfile}"
+    map: "{root}/../readmap -d {e} {genome} {reads} > {outfile}"
+
+reference-tool: GSABWT
+
+genomes:
+  length: [100, 500, 1000]
+  chromosomes: 10
+
+reads:
+  number: 10
+  length: [10, 50]
+  edits: [1, 2]
