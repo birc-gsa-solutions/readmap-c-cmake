@@ -3,7 +3,7 @@ tools:
     preprocess: "gsa preprocess {genome} approx-bwt"
     map: "gsa search {genome} {reads} -o {outfile} approx -e {e} bwt"
   readmap:
-    preprocess: "{root}/../readmap -p {genome} > {outfile}"
+    preprocess: "{root}/../readmap -p {genome}"
     map: "{root}/../readmap -d {e} {genome} {reads} > {outfile}"
 
 reference-tool: GSABWT
