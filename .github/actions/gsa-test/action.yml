@@ -1,16 +1,8 @@
-name: GSA Testing
-on: [push]
-jobs:
-  gsa-testing:
-    name: GSA Testing
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checking out repository
-        uses: actions/checkout@v2
-
-      - name: Building project
-        uses: ./.github/actions/build
-
+name: GSA tests
+description: Run GSA tests
+runs:
+  using: composite
+  steps:
       - name: Setting up Python environment for testing with GSA
         uses: birc-gsa/gsa-test/setup@v1
 
