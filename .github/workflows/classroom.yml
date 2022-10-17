@@ -1,0 +1,41 @@
+name: GitHub Classroom Workflow
+on: [push]
+permissions:
+  checks: write
+  actions: read
+  contents: read
+  
+jobs:
+  testing:
+    name: Autograding
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checking out repository
+        uses: actions/checkout@v2
+
+      - name: Building project
+        uses: ./.github/actions/build
+
+      - name: Unit testing
+        uses: ./.github/actions/unit-testing
+
+      - name: Check if there are project-specific tests
+        id: proj_files
+        uses: andstor/file-existence-action@v1
+        with:
+          files: ./.github/actions/project-test/action.yml
+
+      - name: Project testing
+        if: steps.proj_files.outputs.files_exists == 'true'
+        uses: ./.github/actions/project-test
+
+      - name: Check if we should run GSA tests
+        id: gsa_files
+        uses: andstor/file-existence-action@v1
+        with:
+          files: ./.github/actions/gsa-test/action.yml
+        
+      - name: GSA testing
+        if: steps.gsa_files.outputs.files_exists == 'true'
+        uses: ./.github/actions/gsa-test
+        
