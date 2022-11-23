@@ -1,6 +1,7 @@
 cmake_minimum_required (VERSION 3.21)
 project (PROJECT)
 enable_testing()
+set(CMAKE_C_FLAGS "-O3 -Wall")
 
 add_subdirectory(src)
 
