@@ -270,10 +270,10 @@ static inline struct stack *resize_stack(struct stack *stack)
                                      stack->size);
 }
 
-static inline void push_frame(struct stack **stack, state state)
+static inline void push_frame(struct stack **stack, struct state s)
 {
     *stack = resize_stack(*stack);
-    (*stack)->frames[(*stack)->used++] = state;
+    (*stack)->frames[(*stack)->used++] = s;
 }
 
 static inline state *pop_frame(struct stack **stack)
@@ -356,7 +356,8 @@ static bool match_transition(cstr_approx_matcher *itr, state *s, cstr_approx_mat
 
     // === Recurse, then continue with the next match afterwards =====================================
     // --- First we put the match continuation on the stack...   -------------------------------------
-    PUSH(MATCH(s->match.left, s->match.right, s->match.pos, s->match.d, s->match.edits, s->match.a + 1));
+    PUSH(MATCH(s->match.left, s->match.right, s->match.pos, s->match.d,
+               s->match.edits, (uint8_t)(s->match.a + 1)));
     // --- Then we continue with the recursive operation on pos-1 ------------------------------------
     long long new_left = C(s->match.a) + O(s->match.a, s->match.left);
     long long new_right = C(s->match.a) + O(s->match.a, s->match.right);
@@ -398,8 +399,8 @@ static bool delete_transition(cstr_approx_matcher *itr, state *s, cstr_approx_ma
     long long new_right = C(a) + O(a, right);
     // === Recurse, then continue with a deletion afterwards =====================================
     // --- First we put the deletion continuation on the stack...   ------------------------------
-    PUSH(DELETE(left, right, s->insert.pos, s->insert.d - 1, s->insert.edits, a + 1));
-    // --- Then we continue with the recursive operation on pos-1 ------------------------------------
+    PUSH(DELETE(left, right, s->insert.pos, s->insert.d - 1, s->insert.edits, (uint8_t)(a + 1)));
+    // --- Then we continue with the recursive operation on pos-1 --------------------------------
     RUN_NEXT_STATE(REC(new_left, new_right, s->insert.pos, s->insert.d - 1,
                        CSTR_BUF_SLICE_APPEND(s->insert.edits, 'D')));
 }
@@ -436,52 +437,6 @@ cstr_approx_match cstr_approx_next_match(cstr_approx_matcher *matcher)
     cstr_approx_match match = {.pos = -1, .cigar = ""};
     while (next(matcher, &matcher->current_state, &match)) // FIXME: DO I NEED TO LOOP HERE OR CAN I CALL DIRECTLY IN TRANSITIONS?
         /* Run like a trampoline until we have to return something. */;
-
-#if 0
-    // We pull these into the name space for the O() and C() macros.
-    struct c_table *ctab = matcher->preproc->ctab;
-    struct o_table *otab = matcher->preproc->otab;
-
-    cstr_approx_match match = {.pos = -1, .cigar = ""};
-    while (matcher->stack->used > 0)
-    {
-        struct state *state = pop_frame(&matcher->stack);
-        switch (state->op)
-        {
-
-
-        case M:
-        {
-
-        break;
-
-        case I:
-        {
-
-        }
-        break;
-
-        case D:
-        {
-            if (state->a == matcher->preproc->alpha.size)
-            {
-                // No more delete operations. We are done in this path
-                // of the exploration
-                continue;
-            }
-
-            if (state->edits.from == state->edits.to)
-            {
-                // If we don't have any edits yet, we don't delete.
-                // Those deletions are not interesting.
-                continue;
-            }
-        }
-        break;
-        }
-    }
-#endif
-
     return match;
 }
 
