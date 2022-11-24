@@ -205,17 +205,15 @@ static bool delete_transition(cstr_approx_matcher *itr, state *s, cstr_approx_ma
 
 #define PUSH(STATE) push_frame(&itr->stack, STATE)
 #define POP() *(pop_frame(&itr->stack))
-#define RUN_STACK_TOP() \
-    do                  \
-    {                   \
-        *s = POP();     \
-        return false;   \
+#define RUN_STACK_TOP()                       \
+    do                                        \
+    {                                         \
+        return next(itr, (*s = POP(), s), m); \
     } while (0)
-#define RUN_NEXT_STATE(STATE) \
-    do                        \
-    {                         \
-        *s = STATE;           \
-        return false;         \
+#define RUN_NEXT_STATE(STATE)                 \
+    do                                        \
+    {                                         \
+        return next(itr, (*s = STATE, s), m); \
     } while (0)
 
 // MARK: Stack used for CPS.
@@ -435,8 +433,7 @@ cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
 cstr_approx_match cstr_approx_next_match(cstr_approx_matcher *matcher)
 {
     cstr_approx_match match = {.pos = -1, .cigar = ""};
-    while (next(matcher, &matcher->current_state, &match)) // FIXME: DO I NEED TO LOOP HERE OR CAN I CALL DIRECTLY IN TRANSITIONS?
-        /* Run like a trampoline until we have to return something. */;
+    next(matcher, &matcher->current_state, &match);
     return match;
 }
 
