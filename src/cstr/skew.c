@@ -302,8 +302,6 @@ void cstr_skew(cstr_suffix_array sa, cstr_const_uislice x, cstr_alphabet *alpha)
     skew_rec(sa, x, (unsigned int)alpha->size);
 }
 
-#ifdef GEN_UNIT_TESTS // unit testing of static functions...
-
 TL_TEST(skew_test_len_calc)
 {
     TL_BEGIN();
@@ -331,5 +329,3 @@ TL_TEST(skew_test_len_calc)
 
     TL_END();
 }
-
-#endif

@@ -1,9 +1,6 @@
 #ifndef UNITTESTS_H
 #define UNITTESTS_H
 
-#include "config.h" // do we generate unit tests?
-#ifdef GEN_UNIT_TESTS
-
 #include <testlib.h>
 
 // skew.c
@@ -27,5 +24,4 @@ TL_TEST(st_search);
 TL_TEST(build_ld_tables);
 TL_TEST(ld_iterator);
 
-#endif // GEN_UNIT_TESTS
 #endif // CSTR_UNITTESTS_H

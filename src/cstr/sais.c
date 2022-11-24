@@ -338,8 +338,6 @@ void cstr_sais(cstr_suffix_array sa, cstr_const_uislice x, cstr_alphabet *alpha)
     free(is_s);
 }
 
-#ifdef GEN_UNIT_TESTS // unit testing of static functions...
-
 #include "testlib.h"
 
 TL_TEST(buckets_mississippi)
@@ -637,5 +635,3 @@ TL_TEST(buckets_lms_mississippi)
 
     TL_END();
 }
-
-#endif
