@@ -1,5 +1,5 @@
-cmake_minimum_required (VERSION 3.21)
-project (PROJECT)
+cmake_minimum_required(VERSION 3.21)
+project(readmap)
 enable_testing()
 set(CMAKE_C_FLAGS "-O3 -Wall")
 

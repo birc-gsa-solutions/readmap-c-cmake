@@ -60,7 +60,6 @@ static void preprocess_genome(const char *genome_fname)
         perror("Could not open preprocessing file");
         exit(EXIT_FAILURE);
     }
-    struct fm_index *fm_index = 0;
     for (struct fasta_record *fa_rec = fasta_records(genome);
          fa_rec;
          fa_rec = fa_rec->next)

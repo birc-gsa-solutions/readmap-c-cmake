@@ -57,8 +57,6 @@ target_compile_options(${PROJECT_NAME}
         -O3 # optimisation necessary for CPS trick in search
 )
 
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-    # If we are building test code, then we need to include testlib
-    # so we can create the unit test functions.
-    target_link_libraries(${PROJECT_NAME} testlib)
-endif(CMAKE_BUILD_TYPE MATCHES Debug)
+# If we are building test code, then we need to include testlib
+# so we can create the unit test functions.
+target_link_libraries(${PROJECT_NAME} testlib)
