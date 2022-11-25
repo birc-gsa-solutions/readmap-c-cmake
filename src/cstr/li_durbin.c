@@ -301,20 +301,23 @@ static bool done_transition(cstr_approx_matcher *itr, state *s, cstr_approx_matc
 {
     // When we are done, tell the matcher and return true so iterator returns
     *m = (cstr_approx_match){.pos = -1, .cigar = ""};
-    return true;
+    return false;
 }
 
 static bool emit_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m)
 {
-    if (s->emit.next != s->emit.end)
+    if (s->emit.next < s->emit.end)
     {
         // Emit a match if there are more...
-        *m = (cstr_approx_match){.pos = s->emit.next++, .cigar = s->emit.cigar};
-        return true;
+        *m = (cstr_approx_match){
+            .pos = itr->preproc->sa->buf[s->emit.next],
+            .cigar = s->emit.cigar};
+        // Set the next state to emit the next hit
+        *s = EMIT(s->emit.next + 1, s->emit.end, s->emit.cigar);
+        return false;
     }
     // Otherwise, the next state is at the top of the stack
-    *s = POP();
-    return false; // let the next state take over
+    RUN_STACK_TOP();
 }
 
 static bool rec_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m)
@@ -344,8 +347,9 @@ static bool match_transition(cstr_approx_matcher *itr, state *s, cstr_approx_mat
     // We pull these into the name space for the O() and C() macros.
     struct c_table *ctab = itr->preproc->ctab;
     struct o_table *otab = itr->preproc->otab;
+    uint8_t a = s->match.a;
 
-    if (s->match.a == itr->preproc->alpha.size)
+    if (a == itr->preproc->alpha.size)
     {
         // We are through the alphabet, so there is nothing more to match.
         // Try inserting instead.
@@ -355,10 +359,10 @@ static bool match_transition(cstr_approx_matcher *itr, state *s, cstr_approx_mat
     // === Recurse, then continue with the next match afterwards =====================================
     // --- First we put the match continuation on the stack...   -------------------------------------
     PUSH(MATCH(s->match.left, s->match.right, s->match.pos, s->match.d,
-               s->match.edits, (uint8_t)(s->match.a + 1)));
+               s->match.edits, (uint8_t)(a + 1)));
     // --- Then we continue with the recursive operation on pos-1 ------------------------------------
-    long long new_left = C(s->match.a) + O(s->match.a, s->match.left);
-    long long new_right = C(s->match.a) + O(s->match.a, s->match.right);
+    long long new_left = C(a) + O(a, s->match.left);
+    long long new_right = C(a) + O(a, s->match.right);
     long long new_d = s->match.d - (itr->p.buf[s->match.pos] != s->match.a);
     RUN_NEXT_STATE(REC(new_left, new_right, s->match.pos - 1, new_d,
                        CSTR_BUF_SLICE_APPEND(s->match.edits, 'M')));
@@ -370,7 +374,8 @@ static bool insert_transition(cstr_approx_matcher *itr, state *s, cstr_approx_ma
     // --- First we put the deletion continuation on the stack...   ------------------------------
     PUSH(DELETE(s->insert.left, s->insert.right, s->insert.pos, s->insert.d, s->insert.edits, /* a=*/1));
     // --- Then we continue with the recursive operation on pos-1 ------------------------------------
-    RUN_NEXT_STATE(REC(s->insert.left, s->insert.right, s->insert.pos - 1, s->insert.d - 1,
+    RUN_NEXT_STATE(REC(s->insert.left, s->insert.right,
+                       s->insert.pos - 1, s->insert.d - 1,
                        CSTR_BUF_SLICE_APPEND(s->insert.edits, 'I')));
 }
 
@@ -397,7 +402,7 @@ static bool delete_transition(cstr_approx_matcher *itr, state *s, cstr_approx_ma
     long long new_right = C(a) + O(a, right);
     // === Recurse, then continue with a deletion afterwards =====================================
     // --- First we put the deletion continuation on the stack...   ------------------------------
-    PUSH(DELETE(left, right, s->insert.pos, s->insert.d - 1, s->insert.edits, (uint8_t)(a + 1)));
+    PUSH(DELETE(left, right, s->insert.pos, s->insert.d, s->insert.edits, (uint8_t)(a + 1)));
     // --- Then we continue with the recursive operation on pos-1 --------------------------------
     RUN_NEXT_STATE(REC(new_left, new_right, s->insert.pos, s->insert.d - 1,
                        CSTR_BUF_SLICE_APPEND(s->insert.edits, 'D')));
@@ -433,7 +438,8 @@ cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
 cstr_approx_match cstr_approx_next_match(cstr_approx_matcher *matcher)
 {
     cstr_approx_match match = {.pos = -1, .cigar = ""};
-    next(matcher, &matcher->current_state, &match);
+    while (next(matcher, &matcher->current_state, &match)) // FIXME: DO I NEED TO LOOP HERE OR CAN I CALL DIRECTLY IN TRANSITIONS?
+        /* Run like a trampoline until we have to return something. */;
     return match;
 }
 
