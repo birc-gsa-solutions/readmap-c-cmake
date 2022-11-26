@@ -157,7 +157,7 @@ struct stack
 
 // We only shrink a stack when it is 1/4 used, and then only to 1/2 size,
 // so memory we pop off is still available until the next stack action.
-#define MIN_STACK_SIZE 256
+#define MIN_STACK_SIZE 1000
 static struct stack *new_stack(void)
 {
     struct stack *stack = cstr_malloc_header_array(offsetof(struct stack, frames),
@@ -167,20 +167,15 @@ static struct stack *new_stack(void)
     return stack;
 }
 
-static inline struct stack *resize_stack(struct stack *stack)
-{
-    return stack;
-}
-
 static inline void push_frame(struct stack **stack, struct state s)
 {
     if ((*stack)->used == (*stack)->size)
     {
         (*stack)->size *= 2;
         *stack = cstr_realloc_header_array(stack,
-                                         offsetof(struct stack, frames),
-                                         sizeof (*stack)->frames[0],
-                                         (*stack)->size);
+                                           offsetof(struct stack, frames),
+                                           sizeof(*stack)->frames[0],
+                                           (*stack)->size);
     }
     (*stack)->frames[(*stack)->used++] = s;
 }
