@@ -75,12 +75,12 @@ cstr_li_durbin_preprocess(cstr_const_sslice x)
 
 // MARK: Cigar stuff
 
-static inline long long scan_next(long long i, cstr_const_sslice edits)
+static inline long long scan_next(long long i, const char *edits)
 {
     long long j = i;
     for (; j >= 0; j--)
     {
-        if (edits.buf[i] != edits.buf[j])
+        if (edits[i] != edits[j])
         {
             return j;
         }
@@ -90,131 +90,62 @@ static inline long long scan_next(long long i, cstr_const_sslice edits)
     return -1;
 }
 
-static void edits_to_cigar(char *cigar_buf, cstr_const_sslice edits)
+static void edits_to_cigar(char *cigar_buf, const char *edits)
 {
-    size_t space_left = 2 * (size_t)edits.len + 1; // We allocated at least this much
-    for (long long i = edits.len - 1, j = scan_next(i, edits); i >= 0; i = j, j = scan_next(i, edits))
+    long long edits_len = (long long)strlen(edits);
+    for (long long i = edits_len - 1, j = scan_next(i, edits); i >= 0; i = j, j = scan_next(i, edits))
     {
-        int used = snprintf(cigar_buf, space_left, "%d%c", (int)(i - j), (char)edits.buf[i]);
-        cigar_buf = cigar_buf + used;
-        space_left -= (size_t)used;
+        cigar_buf += sprintf(cigar_buf, "%d%c", (int)(i - j), (char)edits[i]);
     }
     *cigar_buf = '\0';
 }
 
 // MARK: State machine for searching
-struct done_state
+enum states
 {
-    // When we are done, we don't do anything, so we don't
-    // need to remember any data...
-};
-struct emit_state
-{
-    long long next;    // Next index in sa to emit
-    long long end;     // Where the hits end
-    const char *cigar; // The cigar that matches the match
-};
-struct rec_state
-{
-    long long left;              // Range where we have matching
-    long long right;             // prefixes.
-    long long pos;               // Index into p
-    long long d;                 // Number of edits left
-    cstr_sslice_buf_slice edits; // Edit operations so far
-};
-struct match_state
-{
-    long long left;              // Range where we have matching
-    long long right;             // prefixes.
-    long long pos;               // Index into p
-    long long d;                 // Number of edits left
-    cstr_sslice_buf_slice edits; // Edit operations so far
-    uint8_t a;                   // Current letter we are matching/mismatching
-};
-struct insert_state
-{
-    long long left;              // Range where we have matching
-    long long right;             // prefixes.
-    long long pos;               // Index into p
-    long long d;                 // Number of edits left
-    cstr_sslice_buf_slice edits; // Edit operations so far
-};
-struct delete_state
-{
-    long long left;              // Range where we have matching
-    long long right;             // prefixes.
-    long long pos;               // Index into p
-    long long d;                 // Number of edits left
-    cstr_sslice_buf_slice edits; // Edit operations so far
-    uint8_t a;                   // Current letter we are "deleting"
+    EMIT_,
+    DONE_,
+    REC_,
+    MATCH_,
+    INSERT_,
+    DELETE_
 };
 
-struct state;
-typedef struct state state;
-typedef bool (*transition_fn)(cstr_approx_matcher *itr, state *s, cstr_approx_match *m);
 struct state
 {
+    enum states state;
     union
     {
-        struct done_state done;     // Done is just a marker to signal termination
-        struct emit_state emit;     // Emit outputs matches one at a time
-        struct rec_state rec;       // Rec starts the recursion (M->I->D) at a given state
-        struct match_state match;   // Match handles a single match
-        struct insert_state insert; // Insert tries an insertion
-        struct delete_state delete; // and Delete handles a deletion
+        long long left; // LEFT for search
+        long long next; // NEXT for emit
     };
-    transition_fn fn;
+    union
+    {
+        long long right; // RIGHT for search
+        long long end;   // END for emit
+    };
+    long long pos; // Index into p
+    long long d;   // Number of edits left
+    uint8_t a;     // Current letter we are "deleting"
+    union
+    {
+        char *edits; // Edit operations so far, when searching
+        char *cigar; // Shortened to cigar when emitting -- FIXME: might not be needed, as it is in the itr.
+    };
 };
 
-static inline bool next(cstr_approx_matcher *itr, state *s, cstr_approx_match *m)
-{
-    // Call the state's transition function.
-    // We don't need a swithc when we have function calls...
-    // (Assuming that tail call optimisation works, of course).
-    // The function basically works like a trampoline in
-    // continuation-passing-style programming except that
-    // we use an explicit stack.
-    return s->fn(itr, s, m);
-}
-
-// clang-format off
-static bool done_transition  (cstr_approx_matcher *itr, state *s, cstr_approx_match *m);
-static bool emit_transition  (cstr_approx_matcher *itr, state *s, cstr_approx_match *m);
-static bool rec_transition   (cstr_approx_matcher *itr, state *s, cstr_approx_match *m);
-static bool match_transition (cstr_approx_matcher *itr, state *s, cstr_approx_match *m);
-static bool insert_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m);
-static bool delete_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m);
-// clang-format on
-
-#define DONE() ((state){.fn = done_transition})
-#define EMIT(NEXT, END, CIGAR)                                   \
-    ((state){.emit = {.next = NEXT, .end = END, .cigar = CIGAR}, \
-             .fn = (transition_fn)emit_transition})
-#define REC(LEFT, RIGHT, POS, D, EDITS)                                                 \
-    ((state){.rec = {.left = LEFT, .right = RIGHT, .pos = POS, .d = D, .edits = EDITS}, \
-             .fn = (transition_fn)rec_transition})
-#define MATCH(LEFT, RIGHT, POS, D, EDITS, A)                                                      \
-    ((state){.match = {.left = LEFT, .right = RIGHT, .pos = POS, .d = D, .edits = EDITS, .a = A}, \
-             .fn = (transition_fn)match_transition})
-#define INSERT(LEFT, RIGHT, POS, D, EDITS)                                                 \
-    ((state){.insert = {.left = LEFT, .right = RIGHT, .pos = POS, .d = D, .edits = EDITS}, \
-             .fn = (transition_fn)insert_transition})
-#define DELETE(LEFT, RIGHT, POS, D, EDITS, A)                                                     \
-    ((state){.match = {.left = LEFT, .right = RIGHT, .pos = POS, .d = D, .edits = EDITS, .a = A}, \
-             .fn = (transition_fn)delete_transition})
-
-#define PUSH(STATE) push_frame(&itr->stack, STATE)
-#define POP() *(pop_frame(&itr->stack))
-#define RUN_STACK_TOP()                       \
-    do                                        \
-    {                                         \
-        return next(itr, (*s = POP(), s), m); \
-    } while (0)
-#define RUN_NEXT_STATE(STATE)                 \
-    do                                        \
-    {                                         \
-        return next(itr, (*s = STATE, s), m); \
-    } while (0)
+// macros for creating new states
+#define DONE() ((struct state){.state = DONE_})
+#define EMIT(NEXT, END, CIGAR) \
+    ((struct state){.state = EMIT_, .next = NEXT, .end = END, .cigar = CIGAR})
+#define REC(LEFT, RIGHT, POS, D, EDITS) \
+    ((struct state){.state = REC_, .left = LEFT, .right = RIGHT, .pos = POS, .d = D, .edits = EDITS})
+#define MATCH(LEFT, RIGHT, POS, D, EDITS, A) \
+    ((struct state){.state = MATCH_, .left = LEFT, .right = RIGHT, .pos = POS, .d = D, .edits = EDITS, .a = A})
+#define INSERT(LEFT, RIGHT, POS, D, EDITS) \
+    ((struct state){.state = INSERT_, .left = LEFT, .right = RIGHT, .pos = POS, .d = D, .edits = EDITS})
+#define DELETE(LEFT, RIGHT, POS, D, EDITS, A) \
+    ((struct state){.state = DELETE_, .left = LEFT, .right = RIGHT, .pos = POS, .d = D, .edits = EDITS, .a = A})
 
 // MARK: Stack used for CPS.
 // Quite simple implementation, but it suffices for what we need here.
@@ -225,7 +156,7 @@ struct stack
 {
     size_t size;
     size_t used;
-    state frames[];
+    struct state frames[];
 };
 
 // We only shrink a stack when it is 1/4 used, and then only to 1/2 size,
@@ -274,10 +205,10 @@ static inline void push_frame(struct stack **stack, struct state s)
     (*stack)->frames[(*stack)->used++] = s;
 }
 
-static inline state *pop_frame(struct stack **stack)
+static inline struct state pop_frame(struct stack **stack)
 {
     *stack = resize_stack(*stack);
-    return &(*stack)->frames[--(*stack)->used];
+    return (*stack)->frames[--(*stack)->used];
 }
 
 // MARK: iterator for searches
@@ -287,134 +218,153 @@ static inline state *pop_frame(struct stack **stack)
 // them.
 struct cstr_approx_matcher
 {
-    state current_state;
+    struct state current_state;
     cstr_sslice *p_buf;
     cstr_const_sslice p;
     cstr_li_durbin_preproc *preproc;
-    cstr_sslice_buf *edits_buf;
+    // cstr_sslice_buf *edits_buf;
+    char *edits_buf;
     char *cigar_buf;
     struct stack *stack;
 };
 
-// MARK: State transitions
-static bool done_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m)
-{
-    // When we are done, tell the matcher and return true so iterator returns
-    *m = (cstr_approx_match){.pos = -1, .cigar = ""};
-    return false;
-}
 
-static bool emit_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m)
+#define S itr->current_state
+#define PUSH(STATE) push_frame(&itr->stack, STATE)
+#define POP() pop_frame(&itr->stack)
+
+cstr_approx_match cstr_approx_next_match(cstr_approx_matcher *itr)
 {
-    if (s->emit.next < s->emit.end)
+    // Get these into our name space so we can use the macros
+    struct c_table *ctab = itr->preproc->ctab;
+    struct o_table *otab = itr->preproc->otab;
+    long long new_left, new_right;
+    
+    // When called, dispatch on the current state...
+    goto dispatch;
+    
+pop_next: // === Pop the next state from the stack and dispatch it =======================================
+    S = POP();
+    // fall through...
+
+dispatch: // === Jump to the state in current_state ======================================================
+    switch (S.state)
     {
-        // Emit a match if there are more...
-        *m = (cstr_approx_match){
-            .pos = itr->preproc->sa->buf[s->emit.next],
-            .cigar = s->emit.cigar};
-        // Set the next state to emit the next hit
-        *s = EMIT(s->emit.next + 1, s->emit.end, s->emit.cigar);
-        return false;
+    case EMIT_:
+        goto emit;
+    case DONE_:
+        goto done;
+    case REC_:
+        goto rec;
+    case MATCH_:
+        goto match;
+    case INSERT_:
+        goto insert;
+    case DELETE_:
+        goto delete;
     }
-    // Otherwise, the next state is at the top of the stack
-    RUN_STACK_TOP();
-}
 
-static bool rec_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m)
-{
-    if (s->rec.left == s->rec.right || s->rec.d < 0)
+
+rec: // === Processing initial recursion states ==========================================================
+    if (S.left == S.right || S.d < 0)
     {
         // No matches here, so continue with the next continuation...
-        RUN_STACK_TOP();
+        goto pop_next;
     }
 
-    if (s->rec.pos < 0)
+    if (S.pos < 0)
     {
         // We have a match!
-        itr->cigar_buf = cstr_realloc(itr->cigar_buf, (size_t)(2 * itr->edits_buf->cap + 1));
-        edits_to_cigar(itr->cigar_buf, CSTR_SLICE_CONST_CAST(CSTR_BUF_SLICE_DEREF(s->rec.edits)));
-        RUN_NEXT_STATE(EMIT(s->rec.left, s->rec.right, itr->cigar_buf));
+        *S.edits = '\0'; // terminate this string of edits
+        edits_to_cigar(itr->cigar_buf, itr->edits_buf);
+        // FIXME: S.state = EMIT_;
+        S.cigar = itr->cigar_buf;
+        goto emit;
     }
 
     // Otherwise, continue the recursion with the next match operation.
     // The match operation starts with a == 1 because we don't want
     // the sentinel.
-    RUN_NEXT_STATE(MATCH(s->rec.left, s->rec.right, s->rec.pos, s->rec.d, s->rec.edits, /* a = */ 1));
-}
+    // FIXME: S.state = MATCH_;
+    S.a = 1;
+    goto match;
 
-static bool match_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m)
-{
-    // We pull these into the name space for the O() and C() macros.
-    struct c_table *ctab = itr->preproc->ctab;
-    struct o_table *otab = itr->preproc->otab;
-    uint8_t a = s->match.a;
-
-    if (a == itr->preproc->alpha.size)
+match: // === Processing matching states ==============================================================
+    if (S.a == itr->preproc->alpha.size)
     {
         // We are through the alphabet, so there is nothing more to match.
         // Try inserting instead.
-        RUN_NEXT_STATE(INSERT(s->match.left, s->match.right, s->match.pos, s->match.d, s->match.edits));
+        S.state = INSERT_;
+        goto insert;
     }
 
     // === Recurse, then continue with the next match afterwards =====================================
     // --- First we put the match continuation on the stack...   -------------------------------------
-    PUSH(MATCH(s->match.left, s->match.right, s->match.pos, s->match.d,
-               s->match.edits, (uint8_t)(a + 1)));
+    PUSH(MATCH(S.left, S.right, S.pos, S.d, S.edits, (uint8_t)(S.a + 1)));
     // --- Then we continue with the recursive operation on pos-1 ------------------------------------
-    long long new_left = C(a) + O(a, s->match.left);
-    long long new_right = C(a) + O(a, s->match.right);
-    long long new_d = s->match.d - (itr->p.buf[s->match.pos] != s->match.a);
-    RUN_NEXT_STATE(REC(new_left, new_right, s->match.pos - 1, new_d,
-                       CSTR_BUF_SLICE_APPEND(s->match.edits, 'M')));
-}
+    new_left = C(S.a) + O(S.a, S.left);
+    new_right = C(S.a) + O(S.a, S.right);
+    long long new_d = S.d - (itr->p.buf[S.pos] != S.a);
+    
+    // FIXME: S.state = REC_;
+    S.left = new_left;
+    S.right = new_right, S.pos--;
+    S.d = new_d;
+    *S.edits++ = 'M';
+    goto rec;
 
-static bool insert_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m)
-{
+insert: // === Processing insertion states ============================================================
+
     // === Recurse, then continue with a deletion afterwards =====================================
     // --- First we put the deletion continuation on the stack...   ------------------------------
-    PUSH(DELETE(s->insert.left, s->insert.right, s->insert.pos, s->insert.d, s->insert.edits, /* a=*/1));
+    PUSH(DELETE(S.left, S.right, S.pos, S.d, S.edits, /* a=*/1));
     // --- Then we continue with the recursive operation on pos-1 ------------------------------------
-    RUN_NEXT_STATE(REC(s->insert.left, s->insert.right,
-                       s->insert.pos - 1, s->insert.d - 1,
-                       CSTR_BUF_SLICE_APPEND(s->insert.edits, 'I')));
-}
+    // FIXME: S.state = REC_;
+    S.pos--;
+    S.d--;
+    *S.edits++ = 'I';
+    goto rec;
 
-static bool delete_transition(cstr_approx_matcher *itr, state *s, cstr_approx_match *m)
-{
-    unsigned char a = s->delete.a;
-    if (a == itr->preproc->alpha.size)
-    {
-        // No more delete operations. We are done in this path
-        // of the exploration
-        RUN_STACK_TOP();
-    }
-    if (s->delete.edits.from == s->delete.edits.to)
-    {
-        // If we don't have any edits yet, we don't delete.
-        // Those deletions are not interesting.
-        RUN_STACK_TOP();
-    }
+delete: // === Processing deletion states ==============================================================
+        // If there are no more letters for deletions, or if we are in the first operation, we are done here.
+    if (S.a == itr->preproc->alpha.size || S.edits == itr->edits_buf) goto pop_next;
 
-    struct c_table *ctab = itr->preproc->ctab;
-    struct o_table *otab = itr->preproc->otab;
-    long long left = s->delete.left, right = s->delete.right;
-    long long new_left = C(a) + O(a, left);
-    long long new_right = C(a) + O(a, right);
+    new_left = C(S.a) + O(S.a, S.left);
+    new_right = C(S.a) + O(S.a, S.right);
     // === Recurse, then continue with a deletion afterwards =====================================
     // --- First we put the deletion continuation on the stack...   ------------------------------
-    PUSH(DELETE(left, right, s->insert.pos, s->insert.d, s->insert.edits, (uint8_t)(a + 1)));
+    PUSH(DELETE(S.left, S.right, S.pos, S.d, S.edits, (uint8_t)(S.a + 1)));
     // --- Then we continue with the recursive operation on pos-1 --------------------------------
-    RUN_NEXT_STATE(REC(new_left, new_right, s->insert.pos, s->insert.d - 1,
-                       CSTR_BUF_SLICE_APPEND(s->insert.edits, 'D')));
+    // FIXME: S.state = REC_;
+    S.left = new_left;
+    S.right = new_right;
+    S.d--;
+    *S.edits++ = 'D';
+    goto rec;
+
+emit:
+    if (S.next == S.end)
+        goto pop_next; // Done emitting, so continue search
+    // Otherwise, emit a hit
+    return (cstr_approx_match){.pos = itr->preproc->sa->buf[S.next++], .cigar = S.cigar};
+
+done: // === If we end up here, there is nothing more to iterate =============================
+    return (cstr_approx_match){.pos = -1, .cigar = ""};
 }
+#undef S
+#undef PUSH
+#undef POP
 
 cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
                                            cstr_const_sslice p, long long d)
 {
     cstr_approx_matcher *itr = cstr_malloc(sizeof *itr);
     itr->preproc = preproc;
-    itr->edits_buf = cstr_alloc_sslice_buf(0, p.len + d);
-    itr->cigar_buf = 0; // We (re)alloc when we need it
+    // We can have p.len match plus d other operations (and '\0')
+    size_t edit_len = (size_t)p.len + (size_t)d + 1llu;
+    itr->edits_buf = malloc(edit_len); // cstr_alloc_sslice_buf(0, p.len + d);
+    // The cigar can at most be twice the length of the edits;
+    itr->cigar_buf = malloc(2 * edit_len);
 
     itr->p_buf = cstr_alloc_sslice(p.len);
     itr->p = CSTR_SLICE_CONST_CAST(*itr->p_buf);
@@ -422,25 +372,19 @@ cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
     itr->stack = new_stack();
     itr->current_state = DONE(); // In case we can't map, we want to be done...
 
+    // If mapping failed, we leave the stack empty. Then the iterator will
+    // return no matches, but it will still be in a state where we can free
+    // it as per usual.
+    
     if (map_ok)
     {
-        // If mapping failed, we leave the stack empty. Then the iterator will
-        // return no matches, but it will still be in a state where we can free
-        // it as per usual.
-        cstr_sslice_buf_slice edits = {.buf = &itr->edits_buf, .from = 0, .to = 0};
+        // Put a DONE on the stack so we know when to stop, then start with a
+        // REC state.
         push_frame(&itr->stack, DONE()); // Marker for when we complete
-        itr->current_state = REC(0, preproc->sa->len, p.len - 1, d, edits);
+        itr->current_state = REC(0, preproc->sa->len, p.len - 1, d, itr->edits_buf);
     }
 
     return itr;
-}
-
-cstr_approx_match cstr_approx_next_match(cstr_approx_matcher *matcher)
-{
-    cstr_approx_match match = {.pos = -1, .cigar = ""};
-    while (next(matcher, &matcher->current_state, &match)) // FIXME: DO I NEED TO LOOP HERE OR CAN I CALL DIRECTLY IN TRANSITIONS?
-        /* Run like a trampoline until we have to return something. */;
-    return match;
 }
 
 void cstr_free_approx_matcher(cstr_approx_matcher *matcher)
