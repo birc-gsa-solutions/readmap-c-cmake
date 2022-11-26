@@ -169,41 +169,24 @@ static struct stack *new_stack(void)
 
 static inline struct stack *resize_stack(struct stack *stack)
 {
-    if (stack->size / 4 < stack->used && stack->used < stack->size)
-    {
-        return stack; // No resize necessary
-    }
-    if (stack->used < MIN_STACK_SIZE)
-    {
-        // Don't shrink below this size
-        assert(stack->size > stack->used);
-        return stack;
-    }
-    if (stack->used == stack->size)
-    {
-        stack->size *= 2;
-    }
-    else
-    {
-        assert(stack->used <= stack->size / 4);
-        stack->size /= 2;
-        stack->size = (stack->size < MIN_STACK_SIZE) ? MIN_STACK_SIZE : stack->size;
-    }
-    return cstr_realloc_header_array(stack,
-                                     offsetof(struct stack, frames),
-                                     sizeof stack->frames[0],
-                                     stack->size);
+    return stack;
 }
 
 static inline void push_frame(struct stack **stack, struct state s)
 {
-    *stack = resize_stack(*stack);
+    if ((*stack)->used == (*stack)->size)
+    {
+        (*stack)->size *= 2;
+        *stack = cstr_realloc_header_array(stack,
+                                         offsetof(struct stack, frames),
+                                         sizeof (*stack)->frames[0],
+                                         (*stack)->size);
+    }
     (*stack)->frames[(*stack)->used++] = s;
 }
 
 static inline struct state pop_frame(struct stack **stack)
 {
-    *stack = resize_stack(*stack);
     return (*stack)->frames[--(*stack)->used];
 }
 
