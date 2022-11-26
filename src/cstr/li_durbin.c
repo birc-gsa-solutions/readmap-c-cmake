@@ -265,13 +265,17 @@ rec: // === Processing initial recursion states ================================
         // We have a match!
         *S.edits = '\0'; // terminate this string of edits
         edits_to_cigar(itr->cigar_buf, itr->edits_buf);
-        S.next = S.left ; S.end = S.right;
+
+        // ---- Go for emit ------------------------
+        S.next = S.left;
+        S.end = S.right;
         goto emit;
     }
 
     // Otherwise, continue the recursion with the next match operation.
     // The match operation starts with a == 1 because we don't want
     // the sentinel.
+    // ---- Go for match/subs (with the first letter) -----------
     S.a = 1;
     goto match;
 
@@ -280,17 +284,17 @@ match: // === Processing matching states =======================================
     {
         // We are through the alphabet, so there is nothing more to match.
         // Try inserting instead.
-        S.state = INSERT_;
         goto insert;
     }
 
     // === Recurse, then continue with the next match afterwards =====================================
     // --- First we put the match continuation on the stack...   -------------------------------------
     PUSH(MATCH(S.left, S.right, S.pos, S.d, S.edits, (uint8_t)(S.a + 1)));
+
     // --- Then we continue with the recursive operation on pos-1 ------------------------------------
     S.left = C(S.a) + O(S.a, S.left);
     S.right = C(S.a) + O(S.a, S.right);
-    S.d = S.d - (itr->p.buf[S.pos] != S.a);
+    S.d -= itr->p.buf[S.pos] != S.a;
     S.pos--;
     *S.edits++ = 'M';
     goto rec;
@@ -300,19 +304,27 @@ insert: // === Processing insertion states =====================================
     // === Recurse, then continue with a deletion afterwards =====================================
     // --- First we put the deletion continuation on the stack...   ------------------------------
     PUSH(DELETE(S.left, S.right, S.pos, S.d, S.edits, /* a=*/1));
+
     // --- Then we continue with the recursive operation on pos-1 ------------------------------------
     S.pos--;
     S.d--;
     *S.edits++ = 'I';
     goto rec;
 
-    delete : // === Processing deletion states ==============================================================
-             // If there are no more letters for deletions, or if we are in the first operation, we are done here.
-             if (S.a == itr->preproc->alpha.size || S.edits == itr->edits_buf) goto pop_next;
+    // clang-format off
+    // stupid formatter thinks this is the C++ delete...
+delete:  // === Processing deletion states ==============================================================
+    // clang-format on 
+    // If there are no more letters for deletions, or if we are in the first operation, we are done here.
+    if (S.a == itr->preproc->alpha.size || S.edits == itr->edits_buf)
+    {
+        goto pop_next;
+    }
 
     // === Recurse, then continue with a deletion afterwards =====================================
     // --- First we put the deletion continuation on the stack...   ------------------------------
     PUSH(DELETE(S.left, S.right, S.pos, S.d, S.edits, (uint8_t)(S.a + 1)));
+
     // --- Then we continue with the recursive operation on pos-1 --------------------------------
     S.left = C(S.a) + O(S.a, S.left);
     S.right = C(S.a) + O(S.a, S.right);
@@ -334,8 +346,7 @@ emit:
         .pos = itr->preproc->sa->buf[S.next++], .cigar = itr->cigar_buf};
 
 done: // === If we end up here, there is nothing more to iterate =============================
-    return (cstr_approx_match){
-        .pos = -1, .cigar = ""};
+    return (cstr_approx_match){ .pos = -1, .cigar = ""};
 }
 #undef S
 #undef PUSH
