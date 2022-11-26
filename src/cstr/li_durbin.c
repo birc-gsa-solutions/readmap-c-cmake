@@ -127,11 +127,7 @@ struct state
     long long pos; // Index into p
     long long d;   // Number of edits left
     uint8_t a;     // Current letter we are "deleting"
-    union
-    {
-        char *edits; // Edit operations so far, when searching
-        char *cigar; // Shortened to cigar when emitting -- FIXME: might not be needed, as it is in the itr.
-    };
+    char *edits;   // Edit operations so far, when searching
 };
 
 // macros for creating new states
@@ -228,7 +224,6 @@ struct cstr_approx_matcher
     struct stack *stack;
 };
 
-
 #define S itr->current_state
 #define PUSH(STATE) push_frame(&itr->stack, STATE)
 #define POP() pop_frame(&itr->stack)
@@ -238,32 +233,25 @@ cstr_approx_match cstr_approx_next_match(cstr_approx_matcher *itr)
     // Get these into our name space so we can use the macros
     struct c_table *ctab = itr->preproc->ctab;
     struct o_table *otab = itr->preproc->otab;
-    long long new_left, new_right;
-    
+
     // When called, dispatch on the current state...
     goto dispatch;
-    
+
 pop_next: // === Pop the next state from the stack and dispatch it =======================================
     S = POP();
     // fall through...
 
 dispatch: // === Jump to the state in current_state ======================================================
-    switch (S.state)
-    {
-    case EMIT_:
-        goto emit;
-    case DONE_:
-        goto done;
-    case REC_:
-        goto rec;
-    case MATCH_:
-        goto match;
-    case INSERT_:
-        goto insert;
-    case DELETE_:
-        goto delete;
+    // clang-format off
+    switch (S.state) {
+        case EMIT_:   goto emit;
+        case DONE_:   goto done;
+        case REC_:    goto rec;
+        case MATCH_:  goto match;
+        case INSERT_: goto insert;
+        case DELETE_: goto delete;
     }
-
+    // clang-format on
 
 rec: // === Processing initial recursion states ==========================================================
     if (S.left == S.right || S.d < 0)
@@ -277,15 +265,13 @@ rec: // === Processing initial recursion states ================================
         // We have a match!
         *S.edits = '\0'; // terminate this string of edits
         edits_to_cigar(itr->cigar_buf, itr->edits_buf);
-        // FIXME: S.state = EMIT_;
-        S.cigar = itr->cigar_buf;
+        S.next = S.left ; S.end = S.right;
         goto emit;
     }
 
     // Otherwise, continue the recursion with the next match operation.
     // The match operation starts with a == 1 because we don't want
     // the sentinel.
-    // FIXME: S.state = MATCH_;
     S.a = 1;
     goto match;
 
@@ -302,14 +288,10 @@ match: // === Processing matching states =======================================
     // --- First we put the match continuation on the stack...   -------------------------------------
     PUSH(MATCH(S.left, S.right, S.pos, S.d, S.edits, (uint8_t)(S.a + 1)));
     // --- Then we continue with the recursive operation on pos-1 ------------------------------------
-    new_left = C(S.a) + O(S.a, S.left);
-    new_right = C(S.a) + O(S.a, S.right);
-    long long new_d = S.d - (itr->p.buf[S.pos] != S.a);
-    
-    // FIXME: S.state = REC_;
-    S.left = new_left;
-    S.right = new_right, S.pos--;
-    S.d = new_d;
+    S.left = C(S.a) + O(S.a, S.left);
+    S.right = C(S.a) + O(S.a, S.right);
+    S.d = S.d - (itr->p.buf[S.pos] != S.a);
+    S.pos--;
     *S.edits++ = 'M';
     goto rec;
 
@@ -319,25 +301,21 @@ insert: // === Processing insertion states =====================================
     // --- First we put the deletion continuation on the stack...   ------------------------------
     PUSH(DELETE(S.left, S.right, S.pos, S.d, S.edits, /* a=*/1));
     // --- Then we continue with the recursive operation on pos-1 ------------------------------------
-    // FIXME: S.state = REC_;
     S.pos--;
     S.d--;
     *S.edits++ = 'I';
     goto rec;
 
-delete: // === Processing deletion states ==============================================================
-        // If there are no more letters for deletions, or if we are in the first operation, we are done here.
-    if (S.a == itr->preproc->alpha.size || S.edits == itr->edits_buf) goto pop_next;
+    delete : // === Processing deletion states ==============================================================
+             // If there are no more letters for deletions, or if we are in the first operation, we are done here.
+             if (S.a == itr->preproc->alpha.size || S.edits == itr->edits_buf) goto pop_next;
 
-    new_left = C(S.a) + O(S.a, S.left);
-    new_right = C(S.a) + O(S.a, S.right);
     // === Recurse, then continue with a deletion afterwards =====================================
     // --- First we put the deletion continuation on the stack...   ------------------------------
     PUSH(DELETE(S.left, S.right, S.pos, S.d, S.edits, (uint8_t)(S.a + 1)));
     // --- Then we continue with the recursive operation on pos-1 --------------------------------
-    // FIXME: S.state = REC_;
-    S.left = new_left;
-    S.right = new_right;
+    S.left = C(S.a) + O(S.a, S.left);
+    S.right = C(S.a) + O(S.a, S.right);
     S.d--;
     *S.edits++ = 'D';
     goto rec;
@@ -345,11 +323,19 @@ delete: // === Processing deletion states ======================================
 emit:
     if (S.next == S.end)
         goto pop_next; // Done emitting, so continue search
-    // Otherwise, emit a hit
-    return (cstr_approx_match){.pos = itr->preproc->sa->buf[S.next++], .cigar = S.cigar};
+
+    // Otherwise, emit a hit.
+    // Since we return, we have to make sure that we are back in EMIT when we dispatch
+    // the next time. For the other transitions, it only maters when we push, but returning
+    // works a bit like pushing. If we don't set the state, we will dispatch to a random
+    // one when we are called again...
+    S.state = EMIT_;
+    return (cstr_approx_match){
+        .pos = itr->preproc->sa->buf[S.next++], .cigar = itr->cigar_buf};
 
 done: // === If we end up here, there is nothing more to iterate =============================
-    return (cstr_approx_match){.pos = -1, .cigar = ""};
+    return (cstr_approx_match){
+        .pos = -1, .cigar = ""};
 }
 #undef S
 #undef PUSH
@@ -375,7 +361,7 @@ cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
     // If mapping failed, we leave the stack empty. Then the iterator will
     // return no matches, but it will still be in a state where we can free
     // it as per usual.
-    
+
     if (map_ok)
     {
         // Put a DONE on the stack so we know when to stop, then start with a
