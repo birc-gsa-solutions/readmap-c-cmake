@@ -254,7 +254,7 @@ dispatch: // === Jump to the state in current_state ============================
     // clang-format on
 
 rec: // === Processing initial recursion states ==========================================================
-    if (S.left == S.right || S.d - itr->d[S.pos] < 0)
+    if (S.left == S.right || S.d < itr->d[S.pos])
     {
         // No matches here, so continue with the next continuation...
         goto pop_next;
@@ -357,7 +357,10 @@ cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
 {
     cstr_approx_matcher *itr = cstr_malloc(sizeof *itr);
     itr->preproc = preproc;
-    itr->d = malloc((size_t)p.len * sizeof *(itr->d));
+
+    itr->d = malloc((size_t)(p.len + 1) * sizeof *(itr->d));
+    *itr->d++ = 0; // So we can index -1
+
     // We can have p.len match plus d other operations (and '\0')
     size_t edit_len = (size_t)p.len + (size_t)d + 1llu;
     itr->edits_buf = malloc(edit_len); // cstr_alloc_sslice_buf(0, p.len + d);
@@ -391,7 +394,7 @@ cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
 void cstr_free_approx_matcher(cstr_approx_matcher *matcher)
 {
     free(matcher->p_buf);
-    free(matcher->d);
+    free(--matcher->d); // we allocated so we could index at -1
     free(matcher->edits_buf);
     free(matcher->cigar_buf);
     free(matcher->stack);
