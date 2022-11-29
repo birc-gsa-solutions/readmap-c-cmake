@@ -73,9 +73,31 @@ cstr_li_durbin_preprocess(cstr_const_sslice x)
     return preproc;
 }
 
+static void build_dtab(cstr_li_durbin_preproc *preproc,
+                       cstr_const_sslice p, long long d[])
+{
+    struct c_table *ctab = preproc->ctab;
+    struct o_table *otab = preproc->rotab; // using rotab as otab
+    long long left = 0, right = preproc->sa->len;
+    long long edits = 0;
+    for (long long i = 0; i < p.len; i++)
+    {
+        left = C(p.buf[i]) + O(p.buf[i], left);
+        right = C(p.buf[i]) + O(p.buf[i], right);
+        if (left == right)
+        {
+            edits++;
+            left = 0;
+            right = preproc->sa->len;
+        }
+        d[i] = edits;
+    }
+}
+
 // MARK: Cigar stuff
 
-static inline long long scan_next(long long i, const char *edits)
+static inline long long
+scan_next(long long i, const char *edits)
 {
     long long j = i;
     for (; j >= 0; j--)
@@ -196,7 +218,7 @@ struct cstr_approx_matcher
     cstr_sslice *p_buf;
     cstr_const_sslice p;
     cstr_li_durbin_preproc *preproc;
-    // cstr_sslice_buf *edits_buf;
+    long long *d;
     char *edits_buf;
     char *cigar_buf;
     struct stack *stack;
@@ -232,7 +254,7 @@ dispatch: // === Jump to the state in current_state ============================
     // clang-format on
 
 rec: // === Processing initial recursion states ==========================================================
-    if (S.left == S.right || S.d < 0)
+    if (S.left == S.right || S.d - itr->d[S.pos] < 0)
     {
         // No matches here, so continue with the next continuation...
         goto pop_next;
@@ -335,6 +357,7 @@ cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
 {
     cstr_approx_matcher *itr = cstr_malloc(sizeof *itr);
     itr->preproc = preproc;
+    itr->d = malloc((size_t)p.len * sizeof *(itr->d));
     // We can have p.len match plus d other operations (and '\0')
     size_t edit_len = (size_t)p.len + (size_t)d + 1llu;
     itr->edits_buf = malloc(edit_len); // cstr_alloc_sslice_buf(0, p.len + d);
@@ -353,6 +376,9 @@ cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
 
     if (map_ok)
     {
+        // Now that we have remapped we can build the D table
+        build_dtab(preproc, itr->p, itr->d);
+    
         // Put a DONE on the stack so we know when to stop, then start with a
         // REC state.
         push_frame(&itr->stack, DONE()); // Marker for when we complete
@@ -365,6 +391,7 @@ cstr_approx_matcher *cstr_li_durbin_search(cstr_li_durbin_preproc *preproc,
 void cstr_free_approx_matcher(cstr_approx_matcher *matcher)
 {
     free(matcher->p_buf);
+    free(matcher->d);
     free(matcher->edits_buf);
     free(matcher->cigar_buf);
     free(matcher->stack);
